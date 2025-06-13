@@ -1,0 +1,29 @@
+{
+  "messages": [
+    {
+      "role": "system",
+      "content": "Answer questions about files"
+    },
+    {
+      "role": "user",
+      "content": "Есть ли слово котик в файле exxxtreme.txt?"
+    }
+  ],
+  "model": "deepseek-chat",
+  "tools": [
+    {
+      "name": "read_file",
+      "description": "Read file content",
+      "parameters": [
+        {
+          "name": "file_path",
+          "type": "string",
+          "format": "string",
+          "description": "Relative path from current directory",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "tool_choice": "auto"
+}

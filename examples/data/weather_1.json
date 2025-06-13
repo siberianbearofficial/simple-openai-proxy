@@ -1,0 +1,21 @@
+{
+  "messages": [
+    {
+      "role": "system",
+      "content": "Answer questions about the weather"
+    },
+    {
+      "role": "user",
+      "content": "Should I go for a walk?"
+    }
+  ],
+  "model": "deepseek-chat",
+  "tools": [
+    {
+      "name": "get_weather",
+      "description": "Info about current weather",
+      "parameters": []
+    }
+  ],
+  "tool_choice": "auto"
+}

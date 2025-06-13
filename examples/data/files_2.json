@@ -1,0 +1,47 @@
+{
+  "messages": [
+    {
+      "role": "system",
+      "content": "Answer questions about files"
+    },
+    {
+      "role": "user",
+      "content": "Есть ли слово котик в файле exxxtreme.txt?"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_call_id": null,
+      "tool_calls": [
+        {
+          "id": "call_0_2428f7f3-4857-4c6d-b4fe-877a3bdb04e5",
+          "name": "read_file",
+          "arguments": "{\"file_path\":\"exxxtreme.txt\"}"
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "В этом интересном файле так много котов и кошек, но нет ни одного котика! Простите, извините.",
+      "tool_call_id": "call_0_2428f7f3-4857-4c6d-b4fe-877a3bdb04e5",
+      "tool_calls": null
+    }
+  ],
+  "model": "deepseek-chat",
+  "tools": [
+    {
+      "name": "read_file",
+      "description": "Read file content",
+      "parameters": [
+        {
+          "name": "file_path",
+          "type": "string",
+          "format": "string",
+          "description": "Relative path from current directory",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "tool_choice": "auto"
+}

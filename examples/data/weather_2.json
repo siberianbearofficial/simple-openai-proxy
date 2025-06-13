@@ -1,0 +1,43 @@
+{
+  "messages": [
+    {
+      "role": "system",
+      "content": "Answer questions about the weather",
+      "tool_call_id": null,
+      "tool_calls": null
+    },
+    {
+      "role": "user",
+      "content": "Should I go for a walk?",
+      "tool_call_id": null,
+      "tool_calls": null
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_call_id": null,
+      "tool_calls": [
+        {
+          "id": "call_0_51d7aa5d-9756-454f-98da-caa5305e4826",
+          "name": "get_weather",
+          "arguments": "{}"
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "The weather is pleasant and warm today - about 45 degrees Celsius in the shade.",
+      "tool_call_id": "call_0_51d7aa5d-9756-454f-98da-caa5305e4826",
+      "tool_calls": null
+    }
+  ],
+  "model": "deepseek-chat",
+  "tools": [
+    {
+      "name": "get_weather",
+      "description": "Info about current weather",
+      "parameters": []
+    }
+  ],
+  "tool_choice": "auto"
+}
