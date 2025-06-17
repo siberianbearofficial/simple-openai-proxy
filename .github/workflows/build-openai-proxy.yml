@@ -3,7 +3,6 @@ name: Build OpenAI Proxy
 on:
   push:
     paths:
-      - .
       - .github/workflows/build-openai-proxy.yml
 
 env:
