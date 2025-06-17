@@ -3,12 +3,11 @@ name: Build OpenAI Proxy
 on:
   push:
     paths:
-      - .
       - .github/workflows/build-openai-proxy.yml
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}-simple-openai-proxy
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   build-and-push:
