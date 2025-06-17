@@ -16,7 +16,6 @@ from pydantic import BaseModel, Field
 
 
 class OpenAIModel(StrEnum):
-    AUTO = "deepseek-chat"  # todo сделать нормальную логику
     TURBO = "gpt-3.5-turbo"
     GPT4 = "gpt-4.1"
     GPT4_TURBO = "gpt-4-turbo-preview"
@@ -179,7 +178,7 @@ class ChatCompletionRequest(BaseModel):
 
 class OpenAIRequest(BaseModel):
     model: Annotated[
-        OpenAIModel,
+        OpenAIModel | Literal["auto"],
         Field(description="Модель гпт, которую хочется использовать"),
     ]
     messages: Annotated[list[OpenAIMessage], Field(description="Список сообщений")]
@@ -190,8 +189,9 @@ class OpenAIRequest(BaseModel):
     ] = "auto"
 
     def to_gpt(self) -> ChatCompletionRequest:
+        model = OpenAIModel(self.model) if self.model != "auto" else OpenAIModel.DEEPSEEK
         return ChatCompletionRequest(
-            model=self.model,
+            model=model,
             messages=[m.to_gpt() for m in self.messages],
             tools=[f.to_gpt() for f in self.tools],
             tool_choice=self.tool_choice,
