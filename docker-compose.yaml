@@ -1,0 +1,25 @@
+version: '3.9'
+
+services:
+  openai_proxy:
+    image: ghcr.io/siberianbearofficial/simple-openai-proxy:main
+    command: "poetry run uvicorn openai_proxy.app:create_app --reload --factory --port 3000 --host 0.0.0.0"
+    restart: always
+    ports:
+      - "8000:3000"
+    env_file:
+      - local.env
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_POLL_INTERVAL=180           # Проверка каждые 3 минуты
+      - WATCHTOWER_LABEL_ENABLE=true           # Следит только за помеченными контейнерами
+      - WATCHTOWER_INCLUDE_STOPPED=true
