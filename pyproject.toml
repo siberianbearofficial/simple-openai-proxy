@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "openai-proxy"
+name = "openai-async-functions"
 license = "MIT"
 version = "0.1.0"
 description = ""
