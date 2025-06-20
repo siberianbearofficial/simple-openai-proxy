@@ -48,3 +48,11 @@ run-environment: ## Run environment
 stop-environment: ## Stop environment
 	touch envs/local.env
 	@export $$(cat envs/common.env | xargs); export $$(cat envs/local.env | xargs); docker compose down
+
+.PHONY: build
+build: ## Build wheels
+	poetry build
+
+.PHONY: publish
+publish: ## Publish to PyPi
+	poetry publish --username=$(PYPI_USERNAME) --password=$(PYPI_PASSWORD)

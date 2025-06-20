@@ -6,7 +6,7 @@ from openai_proxy.settings.env_settings import EnvSettings
 
 class OpenAISettings(EnvSettings):
     token: str
-    base_url: HttpUrl = HttpUrl("https://api.openai.com/v1")
+    base_url: HttpUrl
     max_message_size: int = 100000
 
 

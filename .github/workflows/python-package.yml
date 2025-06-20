@@ -1,0 +1,33 @@
+name: Python package with Poetry
+
+on:
+  push:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup Python, Poetry and Dependencies
+      uses: dsoftwareinc/setup-python-poetry-action@v1
+      with:
+        python-version: 3.12
+        poetry-version: 2.1.3
+
+#    - name: Lint
+#      run: make lint
+
+#    - name: Test
+#      run: make test
+
+    - name: Build package
+      run: make build
+
+    - name: Publish to PyPI
+      if: github.ref == 'refs/heads/main'
+      run: make publish
+      env:
+        PYPI_USERNAME: '__token__'
+        PYPI_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}

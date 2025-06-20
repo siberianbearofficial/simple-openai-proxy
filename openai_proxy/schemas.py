@@ -12,7 +12,9 @@ from openai.types.chat import (
 )
 from openai.types.chat.chat_completion_message_tool_call import Function
 from openai.types.shared_params import FunctionDefinition
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, fields
+
+from openai_proxy import helpers
 
 
 class OpenAIModel(StrEnum):
@@ -58,6 +60,30 @@ class OpenAIToolParameter(BaseModel):
 
     def to_gpt(self) -> dict[str, object]:
         return self.model_dump(exclude={"name", "required"})
+
+    @classmethod
+    def from_pydantic_field(
+        cls,
+        field_name: str,
+        field_info: fields.FieldInfo,
+    ) -> OpenAIToolParameter:
+        if field_info.annotation is None:
+            err = "Only type annotated fields are supported."
+            raise TypeError(err)
+
+        if field_info.description is None:
+            err = "Field description is required."
+            raise TypeError(err)
+
+        base_type, is_optional = helpers.parse_annotation(field_info.annotation)
+
+        return cls(
+            name=field_name,
+            description=field_info.description,
+            type=helpers.get_openapi_type(base_type),
+            format=helpers.get_openapi_format(base_type),
+            required=not is_optional,
+        )
 
 
 class OpenAITool(BaseModel):
