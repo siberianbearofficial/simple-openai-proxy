@@ -2,6 +2,7 @@ import inspect
 from functools import wraps
 from typing import Any, Callable, Optional, get_type_hints
 
+from loguru import logger
 from pydantic import BaseModel
 
 from openai_proxy import schemas
@@ -36,15 +37,15 @@ class OpenAIProxyToolCallClient:
             method = getattr(self, attr_name)
             tool_info: Optional[ClientToolInfo] = getattr(method, "_tool_info", None)
             if tool_info is not None:
-                self._tools.append(
-                    ClientTool(
-                        name=tool_info.name,
-                        description=tool_info.description,
-                        parameters=tool_info.parameters,
-                        python_method=method,
-                        param_type=tool_info.param_type,
-                    ),
+                tool = ClientTool(
+                    name=tool_info.name,
+                    description=tool_info.description,
+                    parameters=tool_info.parameters,
+                    python_method=method,
+                    param_type=tool_info.param_type,
                 )
+                self._tools.append(tool)
+                logger.debug(f"Tool registered: {tool.model_dump()}")
 
     async def request(self, user_prompt: str) -> str:
         """
@@ -63,6 +64,7 @@ class OpenAIProxyToolCallClient:
 
         while True:
             answer = await self._request_openai()
+            logger.debug(f"OpenAI answer: {answer.model_dump_json()}")
 
             if answer.content:
                 answer_parts.append(answer.content)
@@ -90,9 +92,13 @@ class OpenAIProxyToolCallClient:
         tool_call: schemas.OpenAIToolCall,
         prev_tool_calls: list[schemas.OpenAIToolCall],
     ) -> None:
+        logger.debug("OpenAI wants tool call")
         tool = self._find_tool_by_name(tool_call.name)
+        logger.debug(f"Tool found: {tool.name}")
         req = tool.param_type.model_validate_json(tool_call.arguments)
+        logger.debug(f"Input: {req.model_dump_json()}")
         resp = await tool.python_method(req)
+        logger.debug(f"Output: {resp.model_dump_json()}")
         self._messages.append(
             schemas.OpenAIMessage(
                 role=schemas.OpenAIRole.TOOL,
