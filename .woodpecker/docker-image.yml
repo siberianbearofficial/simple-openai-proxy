@@ -1,0 +1,13 @@
+when:
+  - event: push
+
+steps:
+  - name: build and push
+    image: woodpeckerci/plugin-docker-buildx
+    settings:
+      repo: ghcr.io/siberianbearofficial/simple-openai-proxy
+      registry: ghcr.io
+      username: siberianbearofficial
+      password:
+        from_secret: GITHUB_TOKEN
+      tag: main
