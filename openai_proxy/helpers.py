@@ -45,6 +45,8 @@ def get_openapi_format(t: Type[Any]) -> str:
             return "date"
         case "time":
             return "time"
+        case "string":
+            return "string"
         case _:
             return ""
 
