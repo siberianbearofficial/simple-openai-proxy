@@ -6,6 +6,7 @@ import aiohttp
 
 from openai_proxy import schemas
 from openai_proxy.settings import OpenAIProxyClientSettings
+from openai_proxy.logger import measure
 
 
 class OpenAIProxyClient:
@@ -15,6 +16,7 @@ class OpenAIProxyClient:
     def __get_session(self) -> aiohttp.ClientSession:
         return aiohttp.ClientSession(base_url=str(self._settings.base_url), raise_for_status=True)
 
+    @measure
     async def request(self, request: schemas.OpenAIRequest) -> schemas.OpenAIResponse:
         async with (
             self.__get_session() as session,
