@@ -1,13 +1,13 @@
 from loguru import logger
-import asyncio
+import sys
 import time
 from functools import wraps
 
+from openai_proxy.schemas import OpenAIRequest
+
 
 logger.add(
-    "time.log",
-    rotation="1 MB",
-    retention="30 days",
+    sys.stdout,
     level="DEBUG",
     format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {name}:{function}:{line} | {message}",
     enqueue=True
@@ -18,7 +18,7 @@ def measure(func):
     @wraps(func)
     async def wrapper(*args, **kwargs):
         start_time = time.time()
-        logger.debug(f"Starting {func.__name__}")
+        logger.debug(f"Starting {func.__name__}.")
         try:
             result = await func(*args, **kwargs)
             duration = time.time() - start_time

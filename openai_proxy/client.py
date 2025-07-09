@@ -8,6 +8,7 @@ from openai_proxy.settings import (
     OfficialOpenAISettings,
     OpenAISettings,
 )
+from openai_proxy.logger import measure, logger
 
 
 class OpenAIClient:
@@ -18,7 +19,9 @@ class OpenAIClient:
             base_url=str(settings.base_url),
         )
 
+    @measure
     async def request(self, request: schemas.OpenAIRequest) -> schemas.OpenAIResponse:
+        logger.info(f"model={request.model}")
         response = await self._client.chat.completions.create(
             **request.to_gpt().model_dump(),
         )

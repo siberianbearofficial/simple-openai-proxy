@@ -11,7 +11,7 @@ from openai_proxy.client import (
     get_deepseek_openai_client,
     get_official_openai_client,
 )
-from openai_proxy.logger import measure, logger
+from openai_proxy.logger import logger
 
 
 class OpenAIService:
@@ -23,7 +23,6 @@ class OpenAIService:
         self._official = official_client
         self._deepseek = deepseek_client
 
-    @measure
     async def request(self, req: schemas.OpenAIRequest) -> schemas.OpenAIResponse:
         """Временная реализация с походом в deepseek, а при ошибке в гпт."""
         try:
