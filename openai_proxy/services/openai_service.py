@@ -2,7 +2,6 @@ from functools import lru_cache
 from typing import Annotated
 
 from fastapi import Depends
-from loguru import logger
 from openai import OpenAIError
 
 from openai_proxy import schemas
@@ -12,6 +11,7 @@ from openai_proxy.client import (
     get_deepseek_openai_client,
     get_official_openai_client,
 )
+from openai_proxy.logger import logger
 
 
 class OpenAIService:

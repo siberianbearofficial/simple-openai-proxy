@@ -6,6 +6,7 @@ import aiohttp
 
 from openai_proxy import schemas
 from openai_proxy.settings import OpenAIProxyClientSettings
+from openai_proxy.logger import measure
 
 
 class OpenAIProxyClient:
