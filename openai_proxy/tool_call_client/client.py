@@ -15,6 +15,53 @@ from openai_proxy.tool_call_client.models import ClientTool, ClientToolInfo
 INFO_ATTR = "_tool_info"
 
 
+def client_tool_decorator(func: Callable, description: str):
+    sig = inspect.signature(func)
+    # отфильтровываем self/cls
+    params = [p for p in sig.parameters.values() if p.name not in {"self", "cls"}]
+    if len(params) > 1:
+        err = (
+            f"Decorated method {func.__name__} should have only one argument, "
+            f"but {func.__name__} has {len(params)}"
+        )
+        raise ValueError(err)
+
+    # вытягиваем тип через get_type_hints
+    hints = get_type_hints(func)
+    param_type: Optional[Any] = None
+    if params:
+        param_type = hints.get(params[0].name, None)
+    if param_type is None:
+        err = f"Method {func.__name__} should provide valid type annotation for argument"
+        raise TypeError(err)
+    if not issubclass(param_type, BaseModel):
+        err = f"Method {func.__name__} should inherit from BaseModel"
+        raise TypeError(err)
+
+    # парсим модель пидантика
+    tool_parameters: list[schemas.OpenAIToolParameter] = []
+    for field_name, field_info in param_type.model_fields.items():
+        tool_parameters.append(
+            schemas.OpenAIToolParameter.from_pydantic_field(field_name, field_info),
+        )
+
+    tool_info = ClientToolInfo(
+        name=func.__name__,
+        parameters=tool_parameters,
+        description=description,
+        param_type=param_type,
+    )
+
+    # сохраняем информацию о туле прямо в метод
+    setattr(func, INFO_ATTR, tool_info)
+
+    @wraps(func)
+    async def wrapper(self, *args, **kwargs):
+        return await func(self, *args, **kwargs)
+
+    return wrapper
+
+
 class OpenAIProxyToolCallClient:
     """
     Client for OpenAI proxy tool calls.
@@ -123,50 +170,7 @@ class OpenAIProxyToolCallClient:
         """
 
         def decorator(func: Callable):
-            sig = inspect.signature(func)
-            # отфильтровываем self/cls
-            params = [p for p in sig.parameters.values() if p.name not in {"self", "cls"}]
-            if len(params) > 1:
-                err = (
-                    f"Decorated method {func.__name__} should have only one argument, "
-                    f"but {func.__name__} has {len(params)}"
-                )
-                raise ValueError(err)
-
-            # вытягиваем тип через get_type_hints
-            hints = get_type_hints(func)
-            param_type: Optional[Any] = None
-            if params:
-                param_type = hints.get(params[0].name, None)
-            if param_type is None:
-                err = f"Method {func.__name__} should provide valid type annotation for argument"
-                raise TypeError(err)
-            if not issubclass(param_type, BaseModel):
-                err = f"Method {func.__name__} should inherit from BaseModel"
-                raise TypeError(err)
-
-            # парсим модель пидантика
-            tool_parameters: list[schemas.OpenAIToolParameter] = []
-            for field_name, field_info in param_type.model_fields.items():
-                tool_parameters.append(
-                    schemas.OpenAIToolParameter.from_pydantic_field(field_name, field_info),
-                )
-
-            tool_info = ClientToolInfo(
-                name=func.__name__,
-                parameters=tool_parameters,
-                description=description,
-                param_type=param_type,
-            )
-
-            # сохраняем информацию о туле прямо в метод
-            setattr(func, INFO_ATTR, tool_info)
-
-            @wraps(func)
-            async def wrapper(self, *args, **kwargs):
-                return await func(self, *args, **kwargs)
-
-            return wrapper
+            return client_tool_decorator(func, description)
 
         return decorator
 
@@ -184,6 +188,19 @@ class OpenAIProxyToolCallClient:
                     python_method=method,
                     param_type=tool_info.param_type,
                 )
+                tools.append(tool)
+                logger.debug(f"Tool registered: {tool.model_dump()}")
+
+        return tools
+
+    @staticmethod
+    def collect_tool_methods(obj: object, descriptions: dict[str, str]) -> list[ClientTool]:
+        tools: list[ClientTool] = []
+        for method_name, method_description in descriptions.items():
+            if hasattr(obj, method_name):
+                method = getattr(obj, method_name)
+                client_tool_decorator(method, method_description)
+                tool = getattr(method, INFO_ATTR)
                 tools.append(tool)
                 logger.debug(f"Tool registered: {tool.model_dump()}")
 
