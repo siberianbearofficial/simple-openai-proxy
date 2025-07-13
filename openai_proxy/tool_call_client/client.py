@@ -66,6 +66,7 @@ class OpenAIProxyToolCallClient:
     """
     Client for OpenAI proxy tool calls.
     Use OpenAIProxyToolCallClient.tool decorator to mark methods as tools.
+    Or mark them explicitly with OpenAIProxyToolCallClient.mark_tool_methods.
     Note that only async methods with type annotated arguments are supported.
     """
 
@@ -74,6 +75,7 @@ class OpenAIProxyToolCallClient:
         system_prompts: Optional[list[str]] = None,
         system_prompt_paths: Optional[list[Path]] = None,
         openai_proxy_client_settings: Optional[OpenAIProxyClientSettings] = None,
+        tools: Optional[list[ClientTool]] = None,
     ) -> None:
         system_prompts = ensure_prompts(system_prompts, system_prompt_paths)
 
@@ -85,10 +87,7 @@ class OpenAIProxyToolCallClient:
             )
             for prompt in system_prompts
         ]
-        self._tools: list[ClientTool] = self.collect_tools(self)
-
-    def set_tools(self, tools: list[ClientTool]) -> None:
-        self._tools = tools
+        self._tools: list[ClientTool] = self.collect_tools(self) if tools is None else tools
 
     async def request(self, user_prompt: str) -> str:
         """
@@ -176,6 +175,12 @@ class OpenAIProxyToolCallClient:
 
     @staticmethod
     def collect_tools(obj: object) -> list[ClientTool]:
+        """
+        Собирает все доступные ClientTool, добавленные через
+        декоратор tool и mark_tool_methods.
+        :param obj: Объект, с которого собрать тулы.
+        :return:
+        """
         tools: list[ClientTool] = []
         for attr_name in dir(obj):
             method = getattr(obj, attr_name)
@@ -194,14 +199,19 @@ class OpenAIProxyToolCallClient:
         return tools
 
     @staticmethod
-    def collect_tool_methods(obj: object, descriptions: dict[str, str]) -> list[ClientTool]:
-        tools: list[ClientTool] = []
+    def mark_tool_methods(obj: object, descriptions: dict[str, str]) -> None:
+        """
+        Отмечает методы из словаря description как ClientTool.
+        :param obj: Объект, в котором отметить тулы.
+        :param descriptions: Словарь, где ключ - имя метода, значение - описание метода.
+        :return:
+        """
+        cls = obj.__class__
         for method_name, method_description in descriptions.items():
-            if hasattr(obj, method_name):
-                method = getattr(obj, method_name)
+            if hasattr(cls, method_name):
+                method = getattr(cls, method_name)
                 client_tool_decorator(method, method_description)
-                tool = getattr(method, INFO_ATTR)
-                tools.append(tool)
-                logger.debug(f"Tool registered: {tool.model_dump()}")
 
-        return tools
+        # если тулы в классе клиента, нужно обновить список
+        if isinstance(obj, OpenAIProxyToolCallClient):
+            obj._tools = obj.collect_tools(obj)
