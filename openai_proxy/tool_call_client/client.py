@@ -1,14 +1,18 @@
 import inspect
 from functools import wraps
+from pathlib import Path
 from typing import Any, Callable, Optional, get_type_hints
 
 from loguru import logger
 from pydantic import BaseModel
 
 from openai_proxy import schemas
+from openai_proxy.helpers import ensure_prompts
 from openai_proxy.proxy_client import OpenAIProxyClient
 from openai_proxy.settings import OpenAIProxyClientSettings
 from openai_proxy.tool_call_client.models import ClientTool, ClientToolInfo
+
+INFO_ATTR = "_tool_info"
 
 
 class OpenAIProxyToolCallClient:
@@ -20,9 +24,12 @@ class OpenAIProxyToolCallClient:
 
     def __init__(
         self,
-        system_prompts: list[str],
+        system_prompts: Optional[list[str]] = None,
+        system_prompt_paths: Optional[list[Path]] = None,
         openai_proxy_client_settings: Optional[OpenAIProxyClientSettings] = None,
     ) -> None:
+        system_prompts = ensure_prompts(system_prompts, system_prompt_paths)
+
         self._client = OpenAIProxyClient(openai_proxy_client_settings)
         self._messages = [
             schemas.OpenAIMessage(
@@ -31,21 +38,10 @@ class OpenAIProxyToolCallClient:
             )
             for prompt in system_prompts
         ]
+        self._tools: list[ClientTool] = self.collect_tools(self)
 
-        self._tools: list[ClientTool] = []
-        for attr_name in dir(self):
-            method = getattr(self, attr_name)
-            tool_info: Optional[ClientToolInfo] = getattr(method, "_tool_info", None)
-            if tool_info is not None:
-                tool = ClientTool(
-                    name=tool_info.name,
-                    description=tool_info.description,
-                    parameters=tool_info.parameters,
-                    python_method=method,
-                    param_type=tool_info.param_type,
-                )
-                self._tools.append(tool)
-                logger.debug(f"Tool registered: {tool.model_dump()}")
+    def set_tools(self, tools: list[ClientTool]) -> None:
+        self._tools = tools
 
     async def request(self, user_prompt: str) -> str:
         """
@@ -156,13 +152,15 @@ class OpenAIProxyToolCallClient:
                     schemas.OpenAIToolParameter.from_pydantic_field(field_name, field_info),
                 )
 
-            # сохраняем информацию о туле прямо в метод
-            func._tool_info = ClientToolInfo(
+            tool_info = ClientToolInfo(
                 name=func.__name__,
                 parameters=tool_parameters,
                 description=description,
                 param_type=param_type,
             )
+
+            # сохраняем информацию о туле прямо в метод
+            setattr(func, INFO_ATTR, tool_info)
 
             @wraps(func)
             async def wrapper(self, *args, **kwargs):
@@ -171,3 +169,22 @@ class OpenAIProxyToolCallClient:
             return wrapper
 
         return decorator
+
+    @staticmethod
+    def collect_tools(obj: object) -> list[ClientTool]:
+        tools: list[ClientTool] = []
+        for attr_name in dir(obj):
+            method = getattr(obj, attr_name)
+            tool_info: Optional[ClientToolInfo] = getattr(method, INFO_ATTR, None)
+            if tool_info is not None:
+                tool = ClientTool(
+                    name=tool_info.name,
+                    description=tool_info.description,
+                    parameters=tool_info.parameters,
+                    python_method=method,
+                    param_type=tool_info.param_type,
+                )
+                tools.append(tool)
+                logger.debug(f"Tool registered: {tool.model_dump()}")
+
+        return tools
