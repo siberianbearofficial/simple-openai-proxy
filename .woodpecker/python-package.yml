@@ -1,0 +1,14 @@
+when:
+  - event: push
+
+steps:
+  - name: build and publish
+    image: sunpeek/poetry:py3.12-slim
+    commands:
+      - apt update && apt install make
+      - make build
+      - make publish
+    environment:
+      PYPI_USERNAME: '__token__'
+      PYPI_PASSWORD:
+        from_secret: PYPI_API_TOKEN

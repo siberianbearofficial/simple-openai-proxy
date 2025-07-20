@@ -15,6 +15,14 @@ class WhatToDoResponse(BaseModel):
     suggestion: Annotated[str, Field(description="Suggestion to make a decision")]
 
 
+class AdviceRequest(BaseModel):
+    situation: Annotated[str, Field(description="Situation description to give advice")]
+
+
+class AdviceResponse(BaseModel):
+    advice: Annotated[str, Field(description="Valuable advice for user in given situation")]
+
+
 class ConcreteClient(OpenAIProxyToolCallClient):
     def __init__(
         self,
@@ -24,7 +32,9 @@ class ConcreteClient(OpenAIProxyToolCallClient):
             system_prompts=[
                 (
                     "You are a chatbot that should help users "
-                    "to make decisions in various situations."
+                    "to make decisions in various situations. "
+                    "Also it is necessary to give advice after "
+                    "each decision. Trust tool responses."
                 ),
             ],
             openai_proxy_client_settings=openai_proxy_client_settings,
@@ -41,9 +51,13 @@ class ConcreteClient(OpenAIProxyToolCallClient):
             return WhatToDoResponse(suggestion="Order a Pizza")
         return WhatToDoResponse(suggestion="I can't help you with this situation")
 
+    async def advice(self, req: AdviceRequest) -> AdviceResponse:  # noqa
+        return AdviceResponse(advice="Today's advice: never ask silly questions.")
+
 
 async def main() -> None:
     client = ConcreteClient(OpenAIProxyClientSettings(verify_ssl=False))
+    OpenAIProxyToolCallClient.mark_tool_methods(client, {"advice": "Get daily advice"})
 
     user_prompt = input("Your message: ")
     res = await client.request(user_prompt)

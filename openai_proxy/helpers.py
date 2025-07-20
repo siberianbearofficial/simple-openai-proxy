@@ -1,6 +1,7 @@
 import datetime
 import sys
 import uuid
+from pathlib import Path
 from types import UnionType
 from typing import Annotated, Any, Optional, Type, Union, get_args, get_origin
 
@@ -45,6 +46,8 @@ def get_openapi_format(t: Type[Any]) -> str:
             return "date"
         case "time":
             return "time"
+        case "string":
+            return "string"
         case _:
             return ""
 
@@ -78,3 +81,26 @@ def parse_annotation(annotation: Type[Any]) -> tuple[Type[Any], bool]:
             is_optional = True
 
     return base_type, is_optional
+
+
+def read_prompts(*paths: Path) -> list[str]:
+    return [p.read_text().strip() for p in paths]
+
+
+def ensure_prompts(
+    system_prompts: Optional[list[str]] = None,
+    system_prompt_paths: Optional[list[Path]] = None,
+) -> list[str]:
+    if system_prompts is None and system_prompt_paths is None:
+        err = "Either system_prompts or system_prompt_paths must be provided"
+        raise ValueError(err)
+    if system_prompts is not None and system_prompt_paths is not None:
+        err = "Only one of system_prompts or system_prompt_paths must be provided"
+        raise ValueError(err)
+    if system_prompts is not None:
+        return system_prompts
+    if system_prompt_paths is not None:
+        return read_prompts(*system_prompt_paths)
+
+    err = "Unreachable code"
+    raise RuntimeError(err)
