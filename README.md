@@ -100,7 +100,7 @@ OpenAIProxyToolCallClient.mark_tool_methods(client, {"add": "Add two numbers"})
 
 `CodeBlocksParser` extracts JSON returned by the model inside Markdown code blocks:
 
-```python
+````python
 from pydantic import BaseModel
 from openai_proxy import CodeBlocksParser
 
@@ -119,7 +119,7 @@ Here is the answer:
 parser = CodeBlocksParser(doc)
 block = parser.find_json_block()
 data = Data.model_validate_json(block)
-```
+````
 
 ## Low-level client
 
