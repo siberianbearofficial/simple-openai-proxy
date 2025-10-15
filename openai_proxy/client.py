@@ -21,7 +21,7 @@ class OpenAIClient:
 
     async def request(self, request: schemas.OpenAIRequest) -> schemas.OpenAIResponse:
         response = await self._client.chat.completions.create(
-            **request.to_gpt().model_dump(),
+            **request.to_gpt().model_dump(exclude_none=True),
         )
         return schemas.OpenAIResponse.from_gpt(request, response)
 
