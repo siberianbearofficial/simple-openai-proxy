@@ -196,7 +196,7 @@ class OpenAIToolCall(BaseModel):
 
 
 class ChatCompletionRequest(BaseModel):
-    model: OpenAIModel
+    model: str
     messages: list[dict]  # type: ignore
     tools: list[ChatCompletionToolParam]
     tool_choice: Literal["none", "auto", "required"]
@@ -204,7 +204,7 @@ class ChatCompletionRequest(BaseModel):
 
 class OpenAIRequest(BaseModel):
     model: Annotated[
-        OpenAIModel | Literal["auto"],
+        OpenAIModel | Literal["auto"] | str,
         Field(description="Модель гпт, которую хочется использовать"),
     ]
     messages: Annotated[list[OpenAIMessage], Field(description="Список сообщений")]
@@ -215,7 +215,16 @@ class OpenAIRequest(BaseModel):
     ] = "auto"
 
     def to_gpt(self) -> ChatCompletionRequest:
-        model = OpenAIModel(self.model) if self.model != "auto" else OpenAIModel.DEEPSEEK
+        model: str | OpenAIModel
+        if self.model == "auto":
+            model = OpenAIModel.DEEPSEEK.value
+        elif isinstance(self.model, OpenAIModel):
+            model = self.model.value
+        else:
+            try:
+                model = OpenAIModel(str(self.model)).value
+            except ValueError:
+                model = str(self.model)
         return ChatCompletionRequest(
             model=model,
             messages=[m.to_gpt() for m in self.messages],
