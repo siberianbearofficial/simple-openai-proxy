@@ -7,6 +7,7 @@ from openai_proxy.settings import (
     DeepseekOpenAISettings,
     OfficialOpenAISettings,
     OpenAISettings,
+    PolzaOpenAISettings,
 )
 
 
@@ -20,7 +21,7 @@ class OpenAIClient:
 
     async def request(self, request: schemas.OpenAIRequest) -> schemas.OpenAIResponse:
         response = await self._client.chat.completions.create(
-            **request.to_gpt().model_dump(),
+            **request.to_gpt().model_dump(exclude_none=True),
         )
         return schemas.OpenAIResponse.from_gpt(request, response)
 
@@ -35,6 +36,11 @@ class DeepseekOpenAIClient(OpenAIClient):
         super().__init__(settings)
 
 
+class PolzaOpenAIClient(OpenAIClient):
+    def __init__(self, settings: PolzaOpenAISettings) -> None:
+        super().__init__(settings)
+
+
 @lru_cache
 def get_official_openai_client() -> OfficialOpenAIClient:
     return OfficialOpenAIClient(OfficialOpenAISettings())
@@ -43,3 +49,8 @@ def get_official_openai_client() -> OfficialOpenAIClient:
 @lru_cache
 def get_deepseek_openai_client() -> DeepseekOpenAIClient:
     return DeepseekOpenAIClient(DeepseekOpenAISettings())
+
+
+@lru_cache
+def get_polza_openai_client() -> PolzaOpenAIClient:
+    return PolzaOpenAIClient(PolzaOpenAISettings())

@@ -196,31 +196,52 @@ class OpenAIToolCall(BaseModel):
 
 
 class ChatCompletionRequest(BaseModel):
-    model: OpenAIModel
+    model: str
     messages: list[dict]  # type: ignore
-    tools: list[ChatCompletionToolParam]
-    tool_choice: Literal["none", "auto", "required"]
+    tools: list[ChatCompletionToolParam] | None = None
+    tool_choice: Literal["none", "auto", "required"] | None = None
 
 
 class OpenAIRequest(BaseModel):
     model: Annotated[
-        OpenAIModel | Literal["auto"],
+        OpenAIModel | Literal["auto"] | str,
         Field(description="Модель гпт, которую хочется использовать"),
     ]
     messages: Annotated[list[OpenAIMessage], Field(description="Список сообщений")]
-    tools: Annotated[list[OpenAITool], Field(description="Список доступных тулов")] = []
+    tools: Annotated[
+        list[OpenAITool],
+        Field(description="Список доступных тулов", default_factory=list),
+    ]
     tool_choice: Annotated[
         Literal["none", "auto", "required"],
         Field(description="Обязательно ли вызывать тул"),
     ] = "auto"
 
     def to_gpt(self) -> ChatCompletionRequest:
-        model = OpenAIModel(self.model) if self.model != "auto" else OpenAIModel.DEEPSEEK
+        model: str | OpenAIModel
+        if self.model == "auto":
+            model = OpenAIModel.DEEPSEEK.value
+        elif isinstance(self.model, OpenAIModel):
+            model = self.model.value
+        else:
+            try:
+                model = OpenAIModel(str(self.model)).value
+            except ValueError:
+                model = str(self.model)
+        tools = [f.to_gpt() for f in self.tools]
+        tool_choice: Literal["none", "auto", "required"] | None
+        if tools:
+            tool_choice = self.tool_choice
+        elif self.tool_choice == "auto":
+            tool_choice = None
+        else:
+            tool_choice = self.tool_choice
+
         return ChatCompletionRequest(
             model=model,
             messages=[m.to_gpt() for m in self.messages],
-            tools=[f.to_gpt() for f in self.tools],
-            tool_choice=self.tool_choice,
+            tools=tools or None,
+            tool_choice=tool_choice,
         )
 
 

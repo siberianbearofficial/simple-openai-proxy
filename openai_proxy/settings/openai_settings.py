@@ -24,3 +24,11 @@ class DeepseekOpenAISettings(OpenAISettings):
     )
 
     base_url: HttpUrl = HttpUrl("https://api.deepseek.com/v1")
+
+
+class PolzaOpenAISettings(OpenAISettings):
+    model_config = SettingsConfigDict(
+        env_prefix="POLZA_OPENAI__",
+    )
+
+    base_url: HttpUrl = HttpUrl("https://api.polza.ai/api/v1")
