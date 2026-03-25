@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Annotated, Literal, Optional
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Optional, cast
 
 from openai.types.chat import (
     ChatCompletion,
@@ -15,6 +15,9 @@ from openai.types.shared_params import FunctionDefinition
 from pydantic import BaseModel, Field, fields
 
 from openai_proxy import helpers
+
+if TYPE_CHECKING:
+    from openai.types.chat.completion_create_params import CompletionCreateParamsNonStreaming
 
 
 class OpenAIModel(StrEnum):
@@ -149,14 +152,39 @@ class OpenAIMessage(BaseModel):
             ),
         )
 
-    def to_gpt(self) -> dict:  # type: ignore
-        calls = self.tool_calls or []
-        return dict(  # noqa
-            role=self.role,
-            content=self.content or None,
-            tool_call_id=self.tool_call_id or None,
-            tool_calls=[t.to_gpt() for t in calls] or None,
-        )
+    def to_gpt(self) -> dict[str, Any]:
+        if self.role == OpenAIRole.SYSTEM:
+            if self.content is None:
+                err = "System messages must include content"
+                raise ValueError(err)
+            return {"role": self.role.value, "content": self.content}
+
+        if self.role == OpenAIRole.USER:
+            if self.content is None:
+                err = "User messages must include content"
+                raise ValueError(err)
+            return {"role": self.role.value, "content": self.content}
+
+        if self.role == OpenAIRole.TOOL:
+            if self.content is None:
+                err = "Tool messages must include content"
+                raise ValueError(err)
+            if self.tool_call_id is None:
+                err = "Tool messages must include tool_call_id"
+                raise ValueError(err)
+            return {
+                "role": self.role.value,
+                "content": self.content,
+                "tool_call_id": self.tool_call_id,
+            }
+
+        message: dict[str, Any] = {
+            "role": self.role.value,
+            "content": self.content,
+        }
+        if self.tool_calls:
+            message["tool_calls"] = [tool_call.to_gpt() for tool_call in self.tool_calls]
+        return message
 
 
 class OpenAIToolCall(BaseModel):
@@ -217,17 +245,8 @@ class OpenAIRequest(BaseModel):
         Field(description="Обязательно ли вызывать тул"),
     ] = "auto"
 
-    def to_gpt(self) -> ChatCompletionRequest:
-        model: str | OpenAIModel
-        if self.model == "auto":
-            model = OpenAIModel.DEEPSEEK.value
-        elif isinstance(self.model, OpenAIModel):
-            model = self.model.value
-        else:
-            try:
-                model = OpenAIModel(str(self.model)).value
-            except ValueError:
-                model = str(self.model)
+    def to_chat_completion_params(self) -> CompletionCreateParamsNonStreaming:
+        model = self.model.value if isinstance(self.model, OpenAIModel) else str(self.model)
         tools = [f.to_gpt() for f in self.tools]
         tool_choice: Literal["none", "auto", "required"] | None
         if tools:
@@ -237,12 +256,19 @@ class OpenAIRequest(BaseModel):
         else:
             tool_choice = self.tool_choice
 
-        return ChatCompletionRequest(
+        request: dict[str, Any] = dict(  # noqa
             model=model,
             messages=[m.to_gpt() for m in self.messages],
-            tools=tools or None,
-            tool_choice=tool_choice,
         )
+        if tools:
+            request["tools"] = tools
+        if tool_choice is not None:
+            request["tool_choice"] = tool_choice
+
+        return cast("CompletionCreateParamsNonStreaming", request)
+
+    def to_gpt(self) -> ChatCompletionRequest:
+        return ChatCompletionRequest.model_validate(self.to_chat_completion_params())
 
 
 class OpenAIResponse(BaseModel):

@@ -3,9 +3,9 @@ from typing import Annotated
 
 from fastapi import Depends
 from loguru import logger
-from openai import OpenAIError
+from openai import AsyncStream, OpenAIError
 
-from openai_proxy import schemas
+from openai_proxy import openai_compat, schemas
 from openai_proxy.client import (
     DeepseekOpenAIClient,
     OfficialOpenAIClient,
@@ -27,18 +27,20 @@ class OpenAIService:
         self._deepseek = deepseek_client
         self._polza = polza_client
 
-    async def request(self, req: schemas.OpenAIRequest) -> schemas.OpenAIResponse:
-        """Выполняет запрос к LLM с учетом выбранной модели и провайдера."""
+    async def request(
+        self,
+        req: openai_compat.OpenAICompatibleRequest,
+    ) -> openai_compat.OpenAICompatibleResponse:
+        """Routes an OpenAI-compatible chat completion request to the right provider."""
 
-        model_value = req.model
-        model_str = str(model_value)
+        req = openai_compat.normalize_chat_completion_request(req)
+        model_str = str(req["model"])
 
         if model_str == "auto":
             try:
                 return await self._deepseek.request(req)
-            except OpenAIError as e:
-                err = f"Unable to request deepseek, trying official: {e}"
-                logger.error(err)
+            except OpenAIError as ex:
+                logger.error(f"Unable to request DeepSeek, trying official provider: {ex}")
                 return await self._official.request(req)
 
         if model_str.startswith("polza:"):
@@ -47,7 +49,7 @@ class OpenAIService:
                 err = "Polza model name must follow the 'polza:' prefix"
                 raise ValueError(err)
 
-            polza_request = req.model_copy(update={"model": pure_model})
+            polza_request = {**req, "model": pure_model}
             return await self._polza.request(polza_request)
 
         if model_str in {
@@ -57,6 +59,14 @@ class OpenAIService:
             return await self._deepseek.request(req)
 
         return await self._official.request(req)
+
+    async def request_legacy(self, req: schemas.OpenAIRequest) -> schemas.OpenAIResponse:
+        response = await self.request(req.to_chat_completion_params())
+        if isinstance(response, AsyncStream):
+            err = "Legacy endpoint does not support streaming responses"
+            raise TypeError(err)
+
+        return schemas.OpenAIResponse.from_gpt(req, response)
 
 
 @lru_cache

@@ -1,10 +1,18 @@
-# OpenAI Proxy Library
+# OpenAI Proxy & OpenAI Async Functions library
 
 [![status-badge](https://woodpecker.dev.nachert.art/api/badges/2/status.svg)](https://woodpecker.dev.nachert.art/repos/2)
 
-The library exposes an asynchronous Python interface for calling OpenAI models through a
-simple proxy. It includes helpers for function calling and for parsing structured output from
-the model.
+The library exposes an asynchronous Python interface for calling OpenAI-compatible models through
+a proxy. It includes helpers for function calling and for parsing structured output from the
+model.
+
+The primary API is now the OpenAI-compatible `/v1/chat/completions` endpoint. This means you can
+use the official `openai` SDKs/clients directly against the proxy by setting `base_url` to the
+proxy URL with the `/v1` suffix.
+
+The original simplified endpoint `/api/v1/openai/request` is still available as a deprecated
+compatibility layer. The legacy request/response schemas and `OpenAIProxyClient` are preserved for
+existing integrations, but new code should use the official SDK.
 
 ## Installation
 
@@ -15,10 +23,38 @@ pip install openai-async-functions
 Or install from source:
 
 ```bash
-git clone https://github.com/USER/simple-openai-proxy.git
+git clone https://siberianbearofficial/simple-openai-proxy.git
 cd simple-openai-proxy
 pip install .
 ```
+
+## OpenAI-compatible usage
+
+Use the official SDKs/clients for all new integrations. E.g.:
+
+```python
+import asyncio
+
+from openai import AsyncOpenAI
+
+
+async def main() -> None:
+    client = AsyncOpenAI(
+        api_key="proxy",
+        base_url="https://simple-openai-proxy.nachert.art/v1",
+    )
+    response = await client.chat.completions.create(
+        model="auto",
+        messages=[{"role": "user", "content": "ping"}],
+    )
+    print(response.choices[0].message.content)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+`model="auto"` works through the proxy and keeps provider routing on the server side.
 
 ## Function calling with tools
 
@@ -123,7 +159,10 @@ data = Data.model_validate_json(block)
 
 ## Low-level client
 
-`OpenAIProxyClient` sends arbitrary `OpenAIRequest` objects:
+For new code, prefer the official `openai.AsyncOpenAI` client shown above.
+
+`OpenAIProxyClient` is still available for the deprecated simplified endpoint and sends arbitrary
+`OpenAIRequest` objects:
 
 ```python
 import asyncio
@@ -144,7 +183,8 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-`OpenAIProxyClientSettings` lets you change the base URL and SSL verification parameters.
+`OpenAIProxyClientSettings` lets you change the proxy root URL, API key used by the official SDK,
+and SSL verification parameters.
 
 ## Tests
 
