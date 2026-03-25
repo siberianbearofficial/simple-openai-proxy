@@ -168,9 +168,9 @@ class OpenAIProxyToolCallClient:
         tool_call: Any,
     ) -> None:
         logger.debug("OpenAI wants tool call")
-        tool = self._find_tool_by_name(tool_call.name)
+        tool = self._find_tool_by_name(tool_call.function.name)
         logger.debug(f"Tool found: {tool.name}")
-        req = tool.param_type.model_validate_json(tool_call.arguments)
+        req = tool.param_type.model_validate_json(tool_call.function.arguments)
         logger.debug(f"Input: {req.model_dump_json()}")
         resp = await tool.python_method(req)
         if not isinstance(resp, BaseModel):
