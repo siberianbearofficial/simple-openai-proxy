@@ -7,6 +7,7 @@ from openai_proxy.settings.env_settings import EnvSettings
 class OpenAISettings(EnvSettings):
     token: str
     base_url: HttpUrl
+    default_model: str | None = None
     max_message_size: int = 100000
 
 
@@ -16,6 +17,7 @@ class OfficialOpenAISettings(OpenAISettings):
     )
 
     base_url: HttpUrl = HttpUrl("https://api.openai.com/v1")
+    default_model: str = "gpt-4.1"
 
 
 class DeepseekOpenAISettings(OpenAISettings):
@@ -24,6 +26,7 @@ class DeepseekOpenAISettings(OpenAISettings):
     )
 
     base_url: HttpUrl = HttpUrl("https://api.deepseek.com/v1")
+    default_model: str = "deepseek-chat"
 
 
 class PolzaOpenAISettings(OpenAISettings):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import typing
+import warnings
 
 import aiohttp
 
@@ -11,6 +12,14 @@ from openai_proxy.settings import OpenAIProxyClientSettings
 class OpenAIProxyClient:
     def __init__(self, settings: typing.Optional[OpenAIProxyClientSettings] = None) -> None:
         self._settings: OpenAIProxyClientSettings = settings or OpenAIProxyClientSettings()
+        warnings.warn(
+            (
+                "OpenAIProxyClient is deprecated. "
+                "Use the official openai.AsyncOpenAI client with base_url=<proxy>/v1 instead."
+            ),
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
     def __get_session(self) -> aiohttp.ClientSession:
         return aiohttp.ClientSession(base_url=str(self._settings.base_url), raise_for_status=True)

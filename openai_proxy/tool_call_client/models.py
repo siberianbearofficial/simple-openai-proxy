@@ -1,13 +1,14 @@
-from typing import Awaitable, Callable, Type
+from typing import Any, Awaitable, Callable, Type
 
 from pydantic import BaseModel, ConfigDict
 
-from openai_proxy import schemas
 
+class ClientToolInfo(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
-class ClientToolInfo(schemas.OpenAITool):
-    model_config = ConfigDict(from_attributes=True)
-
+    name: str
+    description: str
+    tool_schema: dict[str, Any]
     param_type: Type[BaseModel]
 
 

@@ -5,17 +5,32 @@ import pytest
 from openai import OpenAIError
 
 from openai_proxy import schemas
+from openai_proxy.openai_compat import normalize_chat_completion_request
 from openai_proxy.services.openai_service import OpenAIService
 
 
-def _make_request(model: str | schemas.OpenAIModel) -> schemas.OpenAIRequest:
+def _make_request(model: str | schemas.OpenAIModel) -> dict[str, object]:
+    return normalize_chat_completion_request(
+        schemas.OpenAIRequest(
+            model=model,
+            messages=[
+                schemas.OpenAIMessage(
+                    role=schemas.OpenAIRole.USER,
+                    content="ping",
+                ),
+            ],
+        ).to_chat_completion_params(),
+    )
+
+
+def _make_legacy_request(model: str | schemas.OpenAIModel) -> schemas.OpenAIRequest:
     return schemas.OpenAIRequest(
         model=model,
         messages=[
             schemas.OpenAIMessage(
                 role=schemas.OpenAIRole.USER,
                 content="ping",
-            )
+            ),
         ],
     )
 
@@ -92,7 +107,7 @@ async def test_polza_model_routes_to_polza_client() -> None:
     official.request.assert_not_called()
     polza.request.assert_awaited_once()
     polza_request = polza.request.call_args.args[0]
-    assert polza_request.model == "chat-1"
+    assert polza_request["model"] == "chat-1"
 
 
 @pytest.mark.asyncio
@@ -111,3 +126,26 @@ async def test_other_models_use_official_client() -> None:
     official.request.assert_awaited_once_with(request)
     deepseek.request.assert_not_called()
     polza.request.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_legacy_request_is_adapted_through_compatible_flow() -> None:
+    official = SimpleNamespace(request=AsyncMock())
+    deepseek = SimpleNamespace(request=AsyncMock())
+    polza = SimpleNamespace(request=AsyncMock())
+    service = OpenAIService(official_client=official, deepseek_client=deepseek, polza_client=polza)
+
+    legacy_request = _make_legacy_request(schemas.OpenAIModel.GPT4.value)
+    completion = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(role="assistant", content="pong", tool_calls=None),
+            ),
+        ],
+    )
+    official.request.return_value = completion
+
+    result = await service.request_legacy(legacy_request)
+
+    assert result.messages[-1].content == "pong"
+    official.request.assert_awaited_once()

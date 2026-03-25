@@ -1,21 +1,30 @@
+from __future__ import annotations
+
 import inspect
 from functools import wraps
-from pathlib import Path
-from typing import Any, Callable, Optional, get_type_hints
+from typing import TYPE_CHECKING, Any, Callable, Optional, get_type_hints
 
 from loguru import logger
+from openai import AsyncOpenAI, DefaultAsyncHttpxClient, pydantic_function_tool
 from pydantic import BaseModel
 
-from openai_proxy import schemas
 from openai_proxy.helpers import ensure_prompts
-from openai_proxy.proxy_client import OpenAIProxyClient
 from openai_proxy.settings import OpenAIProxyClientSettings
 from openai_proxy.tool_call_client.models import ClientTool, ClientToolInfo
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from openai.types.chat import ChatCompletionMessage
 
 INFO_ATTR = "_tool_info"
 
 
 def client_tool_decorator(func: Callable, description: str):
+    if not inspect.iscoroutinefunction(func):
+        err = f"Decorated method {func.__name__} must be async"
+        raise TypeError(err)
+
     sig = inspect.signature(func)
     # отфильтровываем self/cls
     params = [p for p in sig.parameters.values() if p.name not in {"self", "cls"}]
@@ -38,17 +47,23 @@ def client_tool_decorator(func: Callable, description: str):
         err = f"Method {func.__name__} should inherit from BaseModel"
         raise TypeError(err)
 
-    # парсим модель пидантика
-    tool_parameters: list[schemas.OpenAIToolParameter] = []
-    for field_name, field_info in param_type.model_fields.items():
-        tool_parameters.append(
-            schemas.OpenAIToolParameter.from_pydantic_field(field_name, field_info),
-        )
+    return_type = hints.get("return", None)
+    if (
+        return_type is None
+        or not inspect.isclass(return_type)
+        or not issubclass(return_type, BaseModel)
+    ):
+        err = f"Method {func.__name__} should return a BaseModel instance"
+        raise TypeError(err)
 
     tool_info = ClientToolInfo(
         name=func.__name__,
-        parameters=tool_parameters,
         description=description,
+        tool_schema=pydantic_function_tool(
+            param_type,
+            name=func.__name__,
+            description=description,
+        ),
         param_type=param_type,
     )
 
@@ -78,16 +93,27 @@ class OpenAIProxyToolCallClient:
         tools: Optional[list[ClientTool]] = None,
     ) -> None:
         system_prompts = ensure_prompts(system_prompts, system_prompt_paths)
+        settings = openai_proxy_client_settings or OpenAIProxyClientSettings()
 
-        self._client = OpenAIProxyClient(openai_proxy_client_settings)
+        self._client = AsyncOpenAI(
+            api_key=settings.api_key,
+            base_url=settings.openai_base_url,
+            http_client=DefaultAsyncHttpxClient(verify=settings.verify_ssl),
+        )
         self._messages = [
-            schemas.OpenAIMessage(
-                role=schemas.OpenAIRole.SYSTEM,
-                content=prompt,
-            )
+            {"role": "system", "content": prompt}
             for prompt in system_prompts
         ]
         self._tools: list[ClientTool] = self.collect_tools(self) if tools is None else tools
+
+    async def close(self) -> None:
+        await self._client.close()
+
+    async def __aenter__(self) -> OpenAIProxyToolCallClient:
+        return self
+
+    async def __aexit__(self, _exc_type, _exc, _tb) -> None:  # type: ignore[override]
+        await self.close()
 
     async def request(self, user_prompt: str) -> str:
         """
@@ -95,12 +121,7 @@ class OpenAIProxyToolCallClient:
         :param user_prompt: any prompt from user.
         :return: gpt answer.
         """
-        self._messages.append(
-            schemas.OpenAIMessage(
-                role=schemas.OpenAIRole.USER,
-                content=user_prompt,
-            ),
-        )
+        self._messages.append({"role": "user", "content": user_prompt})
 
         answer_parts: list[str] = []
 
@@ -113,41 +134,55 @@ class OpenAIProxyToolCallClient:
 
             if answer.tool_calls:
                 for tool_call in answer.tool_calls:
-                    await self._call_tool(tool_call, answer.tool_calls)
+                    await self._call_tool(tool_call)
             else:
                 break
 
         return "\n".join(answer_parts)
 
-    async def _request_openai(self) -> schemas.OpenAIMessage:
-        req = schemas.OpenAIRequest(
-            model="auto",
-            messages=self._messages,
-            tools=self._tools,
-        )
-        resp = await self._client.request(req)
-        self._messages = resp.messages
-        return resp.messages[-1]
+    async def _request_openai(self) -> ChatCompletionMessage:
+        request_payload: dict[str, object] = {
+            "model": "auto",
+            "messages": self._messages,
+        }
+        if self._tools:
+            request_payload["tools"] = [tool.tool_schema for tool in self._tools]
+            request_payload["tool_choice"] = "auto"
+
+        resp = await self._client.chat.completions.create(**request_payload)
+        message = resp.choices[0].message
+        assistant_message: dict[str, object | None] = {
+            "role": "assistant",
+            "content": message.content,
+        }
+        if message.tool_calls:
+            assistant_message["tool_calls"] = [
+                tool_call.model_dump(mode="json")
+                for tool_call in message.tool_calls
+            ]
+        self._messages.append(assistant_message)
+        return message
 
     async def _call_tool(
         self,
-        tool_call: schemas.OpenAIToolCall,
-        prev_tool_calls: list[schemas.OpenAIToolCall],
+        tool_call: Any,
     ) -> None:
         logger.debug("OpenAI wants tool call")
-        tool = self._find_tool_by_name(tool_call.name)
+        tool = self._find_tool_by_name(tool_call.function.name)
         logger.debug(f"Tool found: {tool.name}")
-        req = tool.param_type.model_validate_json(tool_call.arguments)
+        req = tool.param_type.model_validate_json(tool_call.function.arguments)
         logger.debug(f"Input: {req.model_dump_json()}")
         resp = await tool.python_method(req)
+        if not isinstance(resp, BaseModel):
+            err = f"Tool {tool.name} returned {type(resp).__name__}, expected BaseModel"
+            raise TypeError(err)
         logger.debug(f"Output: {resp.model_dump_json()}")
         self._messages.append(
-            schemas.OpenAIMessage(
-                role=schemas.OpenAIRole.TOOL,
-                content=resp.model_dump_json(),
-                tool_calls=prev_tool_calls,
-                tool_call_id=tool_call.id,
-            ),
+            {
+                "role": "tool",
+                "content": resp.model_dump_json(),
+                "tool_call_id": tool_call.id,
+            },
         )
 
     def _find_tool_by_name(self, name: str) -> ClientTool:
@@ -189,12 +224,12 @@ class OpenAIProxyToolCallClient:
                 tool = ClientTool(
                     name=tool_info.name,
                     description=tool_info.description,
-                    parameters=tool_info.parameters,
+                    tool_schema=tool_info.tool_schema,
                     python_method=method,
                     param_type=tool_info.param_type,
                 )
                 tools.append(tool)
-                logger.debug(f"Tool registered: {tool.model_dump()}")
+                logger.debug(f"Tool registered: {tool.name}")
 
         return tools
 

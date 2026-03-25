@@ -2,7 +2,7 @@ from functools import lru_cache
 
 from openai import AsyncOpenAI
 
-from openai_proxy import schemas
+from openai_proxy import openai_compat
 from openai_proxy.settings import (
     DeepseekOpenAISettings,
     OfficialOpenAISettings,
@@ -13,17 +13,25 @@ from openai_proxy.settings import (
 
 class OpenAIClient:
     def __init__(self, settings: OpenAISettings) -> None:
-        self._api_key = settings.token
+        self._default_model = settings.default_model
         self._client = AsyncOpenAI(
-            api_key=self._api_key,
+            api_key=settings.token,
             base_url=str(settings.base_url),
         )
 
-    async def request(self, request: schemas.OpenAIRequest) -> schemas.OpenAIResponse:
-        response = await self._client.chat.completions.create(
-            **request.to_gpt().model_dump(exclude_none=True),
-        )
-        return schemas.OpenAIResponse.from_gpt(request, response)
+    async def request(
+        self,
+        request: openai_compat.OpenAICompatibleRequest,
+    ) -> openai_compat.OpenAICompatibleResponse:
+        payload = openai_compat.normalize_chat_completion_request(request)
+        if str(payload["model"]) == "auto":
+            if self._default_model is None:
+                err = "Provider does not define a default model for automatic routing"
+                raise ValueError(err)
+
+            payload = {**payload, "model": self._default_model}
+
+        return await self._client.chat.completions.create(**payload)
 
 
 class OfficialOpenAIClient(OpenAIClient):

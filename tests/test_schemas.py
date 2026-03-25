@@ -1,3 +1,5 @@
+import pytest
+
 from openai_proxy import schemas
 
 
@@ -12,6 +14,7 @@ def test_to_gpt_omits_tools_when_not_provided() -> None:
 
     assert "tools" not in payload
     assert "tool_choice" not in payload
+    assert payload["model"] == "auto"
 
 
 def test_to_gpt_includes_tools_when_present() -> None:
@@ -29,9 +32,9 @@ def test_to_gpt_includes_tools_when_present() -> None:
                         format="string",
                         description="Text to echo",
                         required=True,
-                    )
+                    ),
                 ],
-            )
+            ),
         ],
     )
 
@@ -40,3 +43,18 @@ def test_to_gpt_includes_tools_when_present() -> None:
     assert "tools" in payload
     assert payload["tools"]
     assert payload.get("tool_choice") == "auto"
+
+
+def test_to_chat_completion_params_validates_tool_messages() -> None:
+    request = schemas.OpenAIRequest(
+        model="auto",
+        messages=[
+            schemas.OpenAIMessage(
+                role=schemas.OpenAIRole.TOOL,
+                content="{}",
+            ),
+        ],
+    )
+
+    with pytest.raises(ValueError, match="tool_call_id"):
+        request.to_chat_completion_params()
