@@ -14,6 +14,7 @@ from openai_proxy.client import (
     get_official_openai_client,
     get_polza_openai_client,
 )
+from openai_proxy.services.model_routing import ModelRouter, ProviderName
 
 
 class OpenAIService:
@@ -22,10 +23,12 @@ class OpenAIService:
         official_client: OfficialOpenAIClient,
         deepseek_client: DeepseekOpenAIClient,
         polza_client: PolzaOpenAIClient,
+        model_router: ModelRouter | None = None,
     ) -> None:
         self._official = official_client
         self._deepseek = deepseek_client
         self._polza = polza_client
+        self._model_router = model_router or ModelRouter()
 
     async def request(
         self,
@@ -34,31 +37,35 @@ class OpenAIService:
         """Routes an OpenAI-compatible chat completion request to the right provider."""
 
         req = openai_compat.normalize_chat_completion_request(req)
-        model_str = str(req["model"])
+        last_error: OpenAIError | None = None
 
-        if model_str == "auto":
-            try:
-                return await self._deepseek.request(req)
-            except OpenAIError as ex:
-                logger.error(f"Unable to request DeepSeek, trying official provider: {ex}")
-                return await self._official.request(req)
+        for route in self._model_router.build_routes(req.get("model")):
+            routed_request = route.apply_to(req)
+            client = self._get_client(route.provider)
 
-        if model_str.startswith("polza:"):
-            _, _, pure_model = model_str.partition(":")
-            if not pure_model:
-                err = "Polza model name must follow the 'polza:' prefix"
-                raise ValueError(err)
+            for attempt in range(1, route.attempts + 1):
+                try:
+                    return await client.request(routed_request)
+                except OpenAIError as ex:
+                    last_error = ex
+                    if attempt < route.attempts:
+                        logger.warning(
+                            f"Unable to request {route.provider} model {route.model} "
+                            f"(attempt {attempt}/{route.attempts}), retrying: {ex}",
+                        )
+                        continue
 
-            polza_request = {**req, "model": pure_model}
-            return await self._polza.request(polza_request)
+                    logger.error(
+                        f"Unable to request {route.provider} model {route.model}, "
+                        f"trying next route if available: {ex}",
+                    )
+                    break
 
-        if model_str in {
-            schemas.OpenAIModel.DEEPSEEK.value,
-            schemas.OpenAIModel.DEEPSEEK_FAST.value,
-        }:
-            return await self._deepseek.request(req)
+        if last_error is not None:
+            raise last_error
 
-        return await self._official.request(req)
+        err = "Unable to build a model route"
+        raise RuntimeError(err)
 
     async def request_legacy(self, req: schemas.OpenAIRequest) -> schemas.OpenAIResponse:
         response = await self.request(req.to_chat_completion_params())
@@ -67,6 +74,16 @@ class OpenAIService:
             raise TypeError(err)
 
         return schemas.OpenAIResponse.from_gpt(req, response)
+
+    def _get_client(
+        self,
+        provider: ProviderName,
+    ) -> OfficialOpenAIClient | DeepseekOpenAIClient | PolzaOpenAIClient:
+        if provider == "deepseek":
+            return self._deepseek
+        if provider == "polza":
+            return self._polza
+        return self._official
 
 
 @lru_cache

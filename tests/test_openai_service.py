@@ -6,6 +6,12 @@ from openai import OpenAIError
 
 from openai_proxy import schemas
 from openai_proxy.openai_compat import normalize_chat_completion_request
+from openai_proxy.services.model_routing import (
+    AUTO_OFFICIAL_MODEL,
+    AUTO_POLZA_MODEL,
+    DEFAULT_ROUTE_ATTEMPTS,
+    ModelRouter,
+)
 from openai_proxy.services.openai_service import OpenAIService
 
 
@@ -48,7 +54,9 @@ async def test_auto_prefers_deepseek() -> None:
     result = await service.request(request)
 
     assert result == "ok"
-    deepseek.request.assert_awaited_once_with(request)
+    deepseek.request.assert_awaited_once_with(
+        {**request, "model": schemas.OpenAIModel.DEEPSEEK.value},
+    )
     official.request.assert_not_called()
     polza.request.assert_not_called()
 
@@ -67,9 +75,31 @@ async def test_auto_fallbacks_to_official_when_deepseek_fails() -> None:
     result = await service.request(request)
 
     assert result == "official"
-    deepseek.request.assert_awaited_once_with(request)
-    official.request.assert_awaited_once_with(request)
+    assert deepseek.request.await_count == DEFAULT_ROUTE_ATTEMPTS
+    assert official.request.await_count == 1
+    deepseek.request.assert_called_with({**request, "model": schemas.OpenAIModel.DEEPSEEK.value})
+    official.request.assert_awaited_once_with({**request, "model": AUTO_OFFICIAL_MODEL})
     polza.request.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_auto_fallbacks_to_polza_when_official_also_fails() -> None:
+    official = SimpleNamespace(request=AsyncMock())
+    deepseek = SimpleNamespace(request=AsyncMock())
+    polza = SimpleNamespace(request=AsyncMock())
+    service = OpenAIService(official_client=official, deepseek_client=deepseek, polza_client=polza)
+
+    request = _make_request("auto")
+    deepseek.request.side_effect = OpenAIError("deepseek boom")
+    official.request.side_effect = OpenAIError("official boom")
+    polza.request.return_value = "polza"
+
+    result = await service.request(request)
+
+    assert result == "polza"
+    assert deepseek.request.await_count == DEFAULT_ROUTE_ATTEMPTS
+    assert official.request.await_count == DEFAULT_ROUTE_ATTEMPTS
+    polza.request.assert_awaited_once_with({**request, "model": AUTO_POLZA_MODEL})
 
 
 @pytest.mark.asyncio
@@ -91,6 +121,42 @@ async def test_explicit_deepseek_model_uses_deepseek_only() -> None:
 
 
 @pytest.mark.asyncio
+async def test_prefixed_deepseek_model_routes_to_deepseek_client() -> None:
+    official = SimpleNamespace(request=AsyncMock())
+    deepseek = SimpleNamespace(request=AsyncMock())
+    polza = SimpleNamespace(request=AsyncMock())
+    service = OpenAIService(official_client=official, deepseek_client=deepseek, polza_client=polza)
+
+    request = _make_request("deepseek:reasoner")
+    deepseek.request.return_value = "deepseek"
+
+    result = await service.request(request)
+
+    assert result == "deepseek"
+    deepseek.request.assert_awaited_once_with({**request, "model": "reasoner"})
+    official.request.assert_not_called()
+    polza.request.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_prefixed_official_model_routes_to_official_client() -> None:
+    official = SimpleNamespace(request=AsyncMock())
+    deepseek = SimpleNamespace(request=AsyncMock())
+    polza = SimpleNamespace(request=AsyncMock())
+    service = OpenAIService(official_client=official, deepseek_client=deepseek, polza_client=polza)
+
+    request = _make_request("official:gpt-4o-mini")
+    official.request.return_value = "official"
+
+    result = await service.request(request)
+
+    assert result == "official"
+    official.request.assert_awaited_once_with({**request, "model": "gpt-4o-mini"})
+    deepseek.request.assert_not_called()
+    polza.request.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_polza_model_routes_to_polza_client() -> None:
     official = SimpleNamespace(request=AsyncMock())
     deepseek = SimpleNamespace(request=AsyncMock())
@@ -105,9 +171,7 @@ async def test_polza_model_routes_to_polza_client() -> None:
     assert result == "polza"
     deepseek.request.assert_not_called()
     official.request.assert_not_called()
-    polza.request.assert_awaited_once()
-    polza_request = polza.request.call_args.args[0]
-    assert polza_request["model"] == "chat-1"
+    polza.request.assert_awaited_once_with({**request, "model": "chat-1"})
 
 
 @pytest.mark.asyncio
@@ -149,3 +213,18 @@ async def test_legacy_request_is_adapted_through_compatible_flow() -> None:
 
     assert result.messages[-1].content == "pong"
     official.request.assert_awaited_once()
+
+
+def test_model_router_treats_none_as_auto() -> None:
+    routes = ModelRouter().build_routes(None)
+
+    assert [(route.provider, route.model, route.attempts) for route in routes] == [
+        ("deepseek", schemas.OpenAIModel.DEEPSEEK.value, DEFAULT_ROUTE_ATTEMPTS),
+        ("official", AUTO_OFFICIAL_MODEL, DEFAULT_ROUTE_ATTEMPTS),
+        ("polza", AUTO_POLZA_MODEL, DEFAULT_ROUTE_ATTEMPTS),
+    ]
+
+
+def test_model_router_requires_model_after_prefix() -> None:
+    with pytest.raises(ValueError, match="deepseek:"):
+        ModelRouter().build_routes("deepseek:")
