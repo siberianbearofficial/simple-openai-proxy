@@ -15,6 +15,10 @@ from openai_proxy.client import (
     get_polza_openai_client,
 )
 from openai_proxy.services.model_routing import ModelRouter, ProviderName
+from openai_proxy.services.polza_cost_control import (
+    PolzaCostControl,
+    get_polza_cost_control,
+)
 
 
 class OpenAIService:
@@ -24,11 +28,13 @@ class OpenAIService:
         deepseek_client: DeepseekOpenAIClient,
         polza_client: PolzaOpenAIClient,
         model_router: ModelRouter | None = None,
+        polza_cost_control: PolzaCostControl | None = None,
     ) -> None:
         self._official = official_client
         self._deepseek = deepseek_client
         self._polza = polza_client
         self._model_router = model_router or ModelRouter()
+        self._polza_cost_control = polza_cost_control
 
     async def request(
         self,
@@ -45,7 +51,19 @@ class OpenAIService:
 
             for attempt in range(1, route.attempts + 1):
                 try:
-                    return await client.request(routed_request)
+                    if self._polza_cost_control is not None:
+                        await self._polza_cost_control.check_hard_limit(route.provider)
+
+                    response = await client.request(routed_request)
+                    if (
+                        self._polza_cost_control is not None
+                        and not isinstance(response, AsyncStream)
+                    ):
+                        await self._polza_cost_control.record_response_cost(
+                            provider=route.provider,
+                            response=response,
+                            request=routed_request,
+                        )
                 except OpenAIError as ex:
                     last_error = ex
                     if attempt < route.attempts:
@@ -60,6 +78,8 @@ class OpenAIService:
                         f"trying next route if available: {ex}",
                     )
                     break
+                else:
+                    return response
 
         if last_error is not None:
             raise last_error
@@ -92,6 +112,7 @@ def get_openai_service() -> OpenAIService:
         official_client=get_official_openai_client(),
         deepseek_client=get_deepseek_openai_client(),
         polza_client=get_polza_openai_client(),
+        polza_cost_control=get_polza_cost_control(),
     )
 
 

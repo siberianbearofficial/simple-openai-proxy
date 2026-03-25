@@ -13,6 +13,7 @@ from openai_proxy.services.model_routing import (
     ModelRouter,
 )
 from openai_proxy.services.openai_service import OpenAIService
+from openai_proxy.services.polza_cost_control import CostLimitExceededError
 
 
 def _make_request(model: str | schemas.OpenAIModel) -> dict[str, object]:
@@ -169,6 +170,74 @@ async def test_polza_model_routes_to_polza_client() -> None:
     result = await service.request(request)
 
     assert result == "polza"
+    deepseek.request.assert_not_called()
+    official.request.assert_not_called()
+    polza.request.assert_awaited_once_with({**request, "model": "chat-1"})
+
+
+@pytest.mark.asyncio
+async def test_polza_model_checks_hard_limit_before_request() -> None:
+    official = SimpleNamespace(request=AsyncMock())
+    deepseek = SimpleNamespace(request=AsyncMock())
+    polza = SimpleNamespace(request=AsyncMock())
+    polza_cost_control = SimpleNamespace(
+        check_hard_limit=AsyncMock(
+            side_effect=CostLimitExceededError(
+                total_cost_rub=10.0,
+                threshold_rub=10.0,
+                window_seconds=3600,
+            ),
+        ),
+        record_response_cost=AsyncMock(),
+    )
+    service = OpenAIService(
+        official_client=official,
+        deepseek_client=deepseek,
+        polza_client=polza,
+        polza_cost_control=polza_cost_control,
+    )
+
+    request = _make_request("polza:chat-1")
+
+    with pytest.raises(CostLimitExceededError):
+        await service.request(request)
+
+    polza_cost_control.check_hard_limit.assert_awaited_once_with("polza")
+    polza_cost_control.record_response_cost.assert_not_called()
+    deepseek.request.assert_not_called()
+    official.request.assert_not_called()
+    polza.request.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_polza_model_records_response_cost() -> None:
+    official = SimpleNamespace(request=AsyncMock())
+    deepseek = SimpleNamespace(request=AsyncMock())
+    polza = SimpleNamespace(request=AsyncMock())
+    polza_cost_control = SimpleNamespace(
+        check_hard_limit=AsyncMock(),
+        record_response_cost=AsyncMock(),
+    )
+    service = OpenAIService(
+        official_client=official,
+        deepseek_client=deepseek,
+        polza_client=polza,
+        polza_cost_control=polza_cost_control,
+    )
+
+    request = _make_request("polza:chat-1")
+    response = {"id": "gen_1", "usage": {"cost_rub": 0.42}}
+    polza.request.return_value = response
+
+    result = await service.request(request)
+
+    assert result == response
+    polza_cost_control.check_hard_limit.assert_awaited_once_with("polza")
+    polza_cost_control.record_response_cost.assert_awaited_once_with(
+        provider="polza",
+        response=response,
+        request={**request, "model": "chat-1"},
+    )
     deepseek.request.assert_not_called()
     official.request.assert_not_called()
     polza.request.assert_awaited_once_with({**request, "model": "chat-1"})

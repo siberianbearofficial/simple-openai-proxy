@@ -1,3 +1,4 @@
+from openai_proxy.settings.cost_control_settings import PolzaCostControlSettings
 from openai_proxy.settings.openai_settings import (
     DeepseekOpenAISettings,
     OfficialOpenAISettings,
@@ -13,5 +14,6 @@ __all__ = [
     "OfficialOpenAISettings",
     "OpenAIProxyClientSettings",
     "OpenAISettings",
+    "PolzaCostControlSettings",
     "PolzaOpenAISettings",
 ]
