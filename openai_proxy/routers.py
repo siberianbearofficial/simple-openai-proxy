@@ -2,8 +2,7 @@ from collections.abc import AsyncIterator
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
-from openai import AsyncStream
-from openai.types.chat import ChatCompletion, ChatCompletionChunk, CompletionCreateParams
+from openai.types.chat import ChatCompletion, CompletionCreateParams
 
 from openai_proxy import openai_compat, schemas, services
 
@@ -11,7 +10,7 @@ openai_router = APIRouter()
 
 
 async def _stream_chat_completion(
-    stream: AsyncStream[ChatCompletionChunk],
+    stream: openai_compat.ChatCompletionStreamResponse,
 ) -> AsyncIterator[str]:
     try:
         async for chunk in stream:
@@ -37,7 +36,7 @@ async def chat_completions_handler(
 ) -> ChatCompletion | StreamingResponse:
     normalized_request = openai_compat.normalize_chat_completion_request(request)
     response = await openai_service.request(normalized_request)
-    if isinstance(response, AsyncStream):
+    if openai_compat.is_streaming_chat_completion_response(response):
         return StreamingResponse(
             _stream_chat_completion(response),
             media_type="text/event-stream",

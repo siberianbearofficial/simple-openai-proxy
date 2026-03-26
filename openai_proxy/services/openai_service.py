@@ -3,7 +3,7 @@ from typing import Annotated
 
 from fastapi import Depends
 from loguru import logger
-from openai import AsyncStream, OpenAIError
+from openai import OpenAIError
 
 from openai_proxy import openai_compat, schemas
 from openai_proxy.client import (
@@ -55,15 +55,19 @@ class OpenAIService:
                         await self._polza_cost_control.check_hard_limit(route.provider)
 
                     response = await client.request(routed_request)
-                    if (
-                        self._polza_cost_control is not None
-                        and not isinstance(response, AsyncStream)
-                    ):
-                        await self._polza_cost_control.record_response_cost(
-                            provider=route.provider,
-                            response=response,
-                            request=routed_request,
-                        )
+                    if self._polza_cost_control is not None:
+                        if openai_compat.is_streaming_chat_completion_response(response):
+                            response = self._polza_cost_control.wrap_stream(
+                                provider=route.provider,
+                                response=response,
+                                request=routed_request,
+                            )
+                        else:
+                            await self._polza_cost_control.record_response_cost(
+                                provider=route.provider,
+                                response=response,
+                                request=routed_request,
+                            )
                 except OpenAIError as ex:
                     last_error = ex
                     if attempt < route.attempts:
@@ -89,7 +93,7 @@ class OpenAIService:
 
     async def request_legacy(self, req: schemas.OpenAIRequest) -> schemas.OpenAIResponse:
         response = await self.request(req.to_chat_completion_params())
-        if isinstance(response, AsyncStream):
+        if openai_compat.is_streaming_chat_completion_response(response):
             err = "Legacy endpoint does not support streaming responses"
             raise TypeError(err)
 

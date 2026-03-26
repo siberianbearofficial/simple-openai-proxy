@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from openai import OpenAIError
@@ -14,6 +14,23 @@ from openai_proxy.services.model_routing import (
 )
 from openai_proxy.services.openai_service import OpenAIService
 from openai_proxy.services.polza_cost_control import CostLimitExceededError
+
+
+class FakeStream:
+    def __init__(self, chunks: list[object] | None = None) -> None:
+        self._chunks = list(chunks or [])
+        self.closed = False
+
+    def __aiter__(self) -> "FakeStream":
+        return self
+
+    async def __anext__(self) -> object:
+        if not self._chunks:
+            raise StopAsyncIteration
+        return self._chunks.pop(0)
+
+    async def close(self) -> None:
+        self.closed = True
 
 
 def _make_request(model: str | schemas.OpenAIModel) -> dict[str, object]:
@@ -238,6 +255,43 @@ async def test_polza_model_records_response_cost() -> None:
         response=response,
         request={**request, "model": "chat-1"},
     )
+    deepseek.request.assert_not_called()
+    official.request.assert_not_called()
+    polza.request.assert_awaited_once_with({**request, "model": "chat-1"})
+
+
+@pytest.mark.asyncio
+async def test_polza_stream_response_is_wrapped_for_cost_tracking() -> None:
+    official = SimpleNamespace(request=AsyncMock())
+    deepseek = SimpleNamespace(request=AsyncMock())
+    polza = SimpleNamespace(request=AsyncMock())
+    raw_stream = FakeStream([{"usage": {"cost_rub": 0.42}}])
+    wrapped_stream = FakeStream()
+    polza_cost_control = SimpleNamespace(
+        check_hard_limit=AsyncMock(),
+        wrap_stream=Mock(return_value=wrapped_stream),
+        record_response_cost=AsyncMock(),
+    )
+    service = OpenAIService(
+        official_client=official,
+        deepseek_client=deepseek,
+        polza_client=polza,
+        polza_cost_control=polza_cost_control,
+    )
+
+    request = {**_make_request("polza:chat-1"), "stream": True}
+    polza.request.return_value = raw_stream
+
+    result = await service.request(request)
+
+    assert result is wrapped_stream
+    polza_cost_control.check_hard_limit.assert_awaited_once_with("polza")
+    polza_cost_control.wrap_stream.assert_called_once_with(
+        provider="polza",
+        response=raw_stream,
+        request={**request, "model": "chat-1"},
+    )
+    polza_cost_control.record_response_cost.assert_not_called()
     deepseek.request.assert_not_called()
     official.request.assert_not_called()
     polza.request.assert_awaited_once_with({**request, "model": "chat-1"})

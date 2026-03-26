@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
-from typing import Any, TypeAlias, cast
+from collections.abc import AsyncIterator, Iterable, Mapping
+from typing import Any, Protocol, TypeAlias, cast, runtime_checkable
 
-from openai import AsyncStream
 from openai.types.chat import ChatCompletion, ChatCompletionChunk, CompletionCreateParams
 from openai.types.chat.completion_create_params import (
     CompletionCreateParamsNonStreaming,
@@ -14,12 +13,21 @@ from pydantic import TypeAdapter
 OpenAICompatibleRequest: TypeAlias = (
     CompletionCreateParamsNonStreaming | CompletionCreateParamsStreaming
 )
-OpenAICompatibleResponse: TypeAlias = ChatCompletion | AsyncStream[ChatCompletionChunk]
 
 _CHAT_COMPLETION_REQUEST_ADAPTER = TypeAdapter(CompletionCreateParams)
 _NON_STREAMING_CHAT_COMPLETION_REQUEST_ADAPTER = TypeAdapter(
     CompletionCreateParamsNonStreaming,
 )
+
+
+@runtime_checkable
+class ChatCompletionStreamResponse(Protocol):
+    def __aiter__(self) -> AsyncIterator[ChatCompletionChunk]: ...
+
+    async def close(self) -> None: ...
+
+
+OpenAICompatibleResponse: TypeAlias = ChatCompletion | ChatCompletionStreamResponse
 
 
 def normalize_chat_completion_request(
@@ -44,6 +52,10 @@ def normalize_non_streaming_chat_completion_request(
 
 def is_streaming_chat_completion_request(request: OpenAICompatibleRequest) -> bool:
     return bool(request.get("stream"))
+
+
+def is_streaming_chat_completion_response(response: OpenAICompatibleResponse) -> bool:
+    return isinstance(response, ChatCompletionStreamResponse)
 
 
 def _materialize_json_compatible_value(value: Any) -> Any:

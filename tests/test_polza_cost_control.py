@@ -10,6 +10,23 @@ from openai_proxy.services.polza_cost_control import (
 from openai_proxy.settings import PolzaCostControlSettings
 
 
+class FakeStream:
+    def __init__(self, chunks: list[object]) -> None:
+        self._chunks = list(chunks)
+        self.closed = False
+
+    def __aiter__(self) -> "FakeStream":
+        return self
+
+    async def __anext__(self) -> object:
+        if not self._chunks:
+            raise StopAsyncIteration
+        return self._chunks.pop(0)
+
+    async def close(self) -> None:
+        self.closed = True
+
+
 def _make_soft_limit_settings() -> PolzaCostControlSettings:
     return PolzaCostControlSettings(
         soft_threshold_rub=1.0,
@@ -71,3 +88,31 @@ async def test_hard_threshold_blocks_requests_until_window_expires() -> None:
     clock["now"] += 3_601.0
 
     await monitor.check_hard_limit("polza")
+
+
+@pytest.mark.asyncio
+async def test_wrapped_stream_tracks_cost_from_usage_chunk() -> None:
+    monitor = PolzaCostControl(
+        settings=PolzaCostControlSettings(hard_threshold_rub=0.5),
+        now_provider=lambda: 3_000.0,
+    )
+    stream = FakeStream(
+        [
+            {"choices": [{"delta": {"content": "hi"}}]},
+            {"usage": {"cost_rub": 0.7}},
+        ],
+    )
+
+    wrapped_stream = monitor.wrap_stream(
+        provider="polza",
+        response=stream,
+        request={"model": "chat-1"},
+    )
+    chunks = [chunk async for chunk in wrapped_stream]
+
+    await wrapped_stream.close()
+
+    assert chunks[-1] == {"usage": {"cost_rub": 0.7}}
+    assert stream.closed is True
+    with pytest.raises(CostLimitExceededError, match="Превышен жесткий лимит"):
+        await monitor.check_hard_limit("polza")

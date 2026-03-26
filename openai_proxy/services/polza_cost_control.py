@@ -4,16 +4,20 @@ import asyncio
 import json
 import time
 from collections import deque
-from collections.abc import Callable, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
 import httpx
 from loguru import logger
 
+from openai_proxy import openai_compat
 from openai_proxy.services.model_routing import ProviderName
 from openai_proxy.settings import PolzaCostControlSettings
+
+if TYPE_CHECKING:
+    from openai.types.chat import ChatCompletionChunk
 
 
 class CostLimitExceededError(Exception):
@@ -88,6 +92,44 @@ class CostEntry:
     cost_rub: float
 
 
+class CostTrackingAsyncStream:
+    def __init__(
+        self,
+        stream: openai_compat.ChatCompletionStreamResponse,
+        cost_control: PolzaCostControl,
+        provider: ProviderName,
+        request: Mapping[str, object] | None = None,
+    ) -> None:
+        self._stream = stream
+        self._iterator: AsyncIterator[ChatCompletionChunk] = stream.__aiter__()
+        self._cost_control = cost_control
+        self._provider = provider
+        self._request = request
+        self._cost_recorded = False
+        self._closed = False
+
+    def __aiter__(self) -> CostTrackingAsyncStream:
+        return self
+
+    async def __anext__(self) -> ChatCompletionChunk:
+        chunk = await self._iterator.__anext__()
+        if not self._cost_recorded and self._cost_control._extract_cost_rub(chunk) is not None:
+            await self._cost_control.record_response_cost(
+                provider=self._provider,
+                response=chunk,
+                request=self._request,
+            )
+            self._cost_recorded = True
+        return chunk
+
+    async def close(self) -> None:
+        if self._closed:
+            return
+
+        self._closed = True
+        await self._stream.close()
+
+
 class PolzaCostControl:
     def __init__(
         self,
@@ -101,6 +143,24 @@ class PolzaCostControl:
         self._entries: deque[CostEntry] = deque()
         self._total_cost_rub = 0.0
         self._lock = asyncio.Lock()
+
+    def wrap_stream(
+        self,
+        provider: ProviderName,
+        response: openai_compat.ChatCompletionStreamResponse,
+        request: Mapping[str, object] | None = None,
+    ) -> openai_compat.ChatCompletionStreamResponse:
+        if provider != "polza" or not self._settings.any_limit_enabled:
+            return response
+        if isinstance(response, CostTrackingAsyncStream):
+            return response
+
+        return CostTrackingAsyncStream(
+            stream=response,
+            cost_control=self,
+            provider=provider,
+            request=request,
+        )
 
     async def check_hard_limit(self, provider: ProviderName) -> None:
         if provider != "polza" or not self._settings.hard_limit_enabled:
